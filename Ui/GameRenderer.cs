@@ -4,8 +4,7 @@ public enum GameOverlay
 {
     None,
     Paused,
-    GameOver,
-    Won,
+    RoundOver,
 }
 
 /// <summary>
@@ -15,14 +14,14 @@ public enum GameOverlay
 /// </summary>
 public sealed class GameRenderer
 {
-    public const int CanvasWidth = SnakeGame.Width * 2 + 2;
-    public const int CanvasHeight = SnakeGame.Height + 6;
+    public const int CanvasWidth = GameWorld.Width * 2 + 2;
+    public const int CanvasHeight = GameWorld.Height + 6;
 
     private const int BoardTop = 3;
-    private const int BoardHeight = SnakeGame.Height + 2;
+    private const int BoardHeight = GameWorld.Height + 2;
     private const int InteriorLeft = 1;
     private const int InteriorTop = 4;
-    private const int InteriorWidth = SnakeGame.Width * 2;
+    private const int InteriorWidth = GameWorld.Width * 2;
     private const int FooterRow = CanvasHeight - 1;
 
     private readonly bool _useColor;
@@ -39,7 +38,14 @@ public sealed class GameRenderer
         DrawCenteredRuns(
             canvas,
             1,
-            new TextRun("A TINY TERMINAL ARCADE", Style(Theme.Muted, dim: true)));
+            new TextRun("TWO SNAKES · ONE BOARD", Style(Theme.Muted, dim: true)));
+        DrawCenteredRuns(
+            canvas,
+            2,
+            new TextRun("P1  WASD + E", Style(Theme.PlayerOne, bold: true)),
+            new TextRun("      VS      ", Style(Theme.Muted, dim: true)),
+            new TextRun("P2  ARROWS + O", Style(Theme.PlayerTwo, bold: true)));
+
         DrawBoard(canvas);
 
         DrawCenteredInBoard(canvas, 5, "S E L E C T   Y O U R   P A C E", Style(Theme.Muted, dim: true));
@@ -47,7 +53,8 @@ public sealed class GameRenderer
         const int cardWidth = 20;
         const int cardHeight = 5;
         const int cardGap = 4;
-        int cardsWidth = cardWidth * DifficultyProfile.All.Count + cardGap * (DifficultyProfile.All.Count - 1);
+        int cardsWidth = cardWidth * DifficultyProfile.All.Count
+            + cardGap * (DifficultyProfile.All.Count - 1);
         int cardStartX = InteriorLeft + (InteriorWidth - cardsWidth) / 2;
         const int cardTop = 7;
 
@@ -76,17 +83,19 @@ public sealed class GameRenderer
         DrawCenteredRuns(
             canvas,
             15,
-            new TextRun("LEFT / RIGHT", Style(Theme.Mint)),
-            new TextRun("  CHOOSE     ", Style(Theme.Muted)),
-            new TextRun("1 / 2 / 3", Style(Theme.Mint)),
-            new TextRun("  QUICK PICK", Style(Theme.Muted)));
+            new TextRun("BOOST ", Style(Theme.Muted)),
+            new TextRun("2s SURGE", Style(Theme.Gold, bold: true)),
+            new TextRun("  ·  ", Style(Theme.Border, dim: true)),
+            new TextRun("7s COOLDOWN", Style(Theme.Muted)),
+            new TextRun("  ·  ", Style(Theme.Border, dim: true)),
+            new TextRun("E / O", Style(Theme.Mint)));
 
         DrawCenteredRuns(
             canvas,
             17,
             new TextRun("EAT ", Style(Theme.Muted)),
             new TextRun("◆", Style(Theme.Food, bold: true)),
-            new TextRun(" TO GROW       WALLS ARE SOLID", Style(Theme.Muted)));
+            new TextRun(" +10       LAST SNAKE SLITHERING WINS", Style(Theme.Muted)));
 
         DrawFooter(
             canvas,
@@ -100,28 +109,26 @@ public sealed class GameRenderer
         return canvas;
     }
 
-    public Canvas BuildGame(SnakeGame game, int best, GameOverlay overlay, bool newBest)
+    public Canvas BuildGame(GameWorld world, GameOverlay overlay, bool newBest)
     {
         var canvas = new Canvas(CanvasWidth, CanvasHeight, _useColor);
         DrawLogo(canvas);
 
-        string mode = DifficultyProfile.For(game.Difficulty).Name;
+        string mode = DifficultyProfile.For(world.Difficulty).Name;
         canvas.Write(CanvasWidth - mode.Length - 1, 0, mode, Style(Theme.Muted, dim: true));
 
-        DrawStats(canvas, game, best);
+        DrawPlayerHud(canvas, 1, world.Players[0]);
+        DrawPlayerHud(canvas, 2, world.Players[1]);
         DrawBoard(canvas);
-        DrawPlayfield(canvas, game);
+        DrawPlayfield(canvas, world);
 
         switch (overlay)
         {
             case GameOverlay.Paused:
                 DrawPausedOverlay(canvas);
                 break;
-            case GameOverlay.GameOver:
-                DrawFinishedOverlay(canvas, game, best, newBest, won: false);
-                break;
-            case GameOverlay.Won:
-                DrawFinishedOverlay(canvas, game, best, newBest, won: true);
+            case GameOverlay.RoundOver:
+                DrawRoundOverOverlay(canvas, world, newBest);
                 break;
         }
 
@@ -143,10 +150,10 @@ public sealed class GameRenderer
                 new("Q", Style(Theme.Mint)),
                 new("  QUIT", Style(Theme.Muted)),
             ],
-            GameOverlay.GameOver or GameOverlay.Won =>
+            GameOverlay.RoundOver =>
             [
                 new("SPACE", Style(Theme.Mint)),
-                new("  PLAY AGAIN     ", Style(Theme.Muted)),
+                new("  REMATCH     ", Style(Theme.Muted)),
                 new("M", Style(Theme.Mint)),
                 new("  MENU     ", Style(Theme.Muted)),
                 new("Q", Style(Theme.Mint)),
@@ -154,12 +161,12 @@ public sealed class GameRenderer
             ],
             _ =>
             [
-                new("WASD / ARROWS", Style(Theme.Mint)),
-                new("  MOVE     ", Style(Theme.Muted)),
+                new("P1 WASD + E", Style(Theme.PlayerOne)),
+                new("  BOOST     ", Style(Theme.Muted)),
+                new("P2 ARROWS + O", Style(Theme.PlayerTwo)),
+                new("  BOOST     ", Style(Theme.Muted)),
                 new("P / ESC", Style(Theme.Mint)),
-                new("  PAUSE     ", Style(Theme.Muted)),
-                new("CTRL+C", Style(Theme.Mint)),
-                new("  QUIT", Style(Theme.Muted)),
+                new("  PAUSE", Style(Theme.Muted)),
             ],
         };
 
@@ -173,25 +180,54 @@ public sealed class GameRenderer
             new TextRun("◆", Style(Theme.Food, bold: true)));
     }
 
-    private void DrawStats(Canvas canvas, SnakeGame game, int best)
+    private void DrawPlayerHud(Canvas canvas, int row, SnakePlayer player)
     {
+        PlayerColors colors = ColorsFor(player.Index);
+        string key = player.Index == 0 ? "E" : "O";
+
+        TextRun skillRun;
+        if (!player.Alive)
+        {
+            skillRun = new TextRun("OUT", Style(Theme.Food, bold: true));
+        }
+        else if (player.IsBoostActive)
+        {
+            skillRun = new TextRun(
+                $"BOOST {player.BoostActiveRemainingMs / 1000.0:0.0}s",
+                Style(Theme.Gold, bold: true));
+        }
+        else if (player.BoostCooldownRemainingMs > 0)
+        {
+            skillRun = new TextRun(
+                $"COOLDOWN {player.BoostCooldownRemainingMs / 1000.0:0.0}s",
+                Style(Theme.Muted));
+        }
+        else
+        {
+            skillRun = new TextRun(
+                $"BOOST READY [{key}]",
+                Style(colors.Accent, bold: true));
+        }
+
         DrawCenteredRuns(
             canvas,
-            1,
-            new TextRun("SCORE ", Style(Theme.Muted)),
-            new TextRun(game.Score.ToString("D4"), Style(Theme.Text, bold: true)),
+            row,
+            new TextRun($"P{player.Index + 1}", Style(colors.Accent, bold: true)),
+            new TextRun("  SCORE ", Style(Theme.Muted)),
+            new TextRun(player.Score.ToString("D4"), Style(Theme.Text, bold: true)),
             new TextRun("  ·  ", Style(Theme.Border, dim: true)),
-            new TextRun("BEST ", Style(Theme.Muted)),
-            new TextRun(best.ToString("D4"), Style(Theme.Gold, bold: true)),
+            new TextRun("LEN ", Style(Theme.Muted)),
+            new TextRun(player.Length.ToString("D2"), Style(Theme.Text)),
             new TextRun("  ·  ", Style(Theme.Border, dim: true)),
-            new TextRun("LEVEL ", Style(Theme.Muted)),
-            new TextRun(game.Level.ToString("D2"), Style(Theme.Mint)),
-            new TextRun("  ·  ", Style(Theme.Border, dim: true)),
-            new TextRun("LENGTH ", Style(Theme.Muted)),
-            new TextRun(game.Length.ToString("D2"), Style(Theme.Text)),
+            new TextRun("LV ", Style(Theme.Muted)),
+            new TextRun(player.Level.ToString("D2"), Style(Theme.Mint)),
             new TextRun("  ·  ", Style(Theme.Border, dim: true)),
             new TextRun("SPEED ", Style(Theme.Muted)),
-            new TextRun($"{game.SpeedMultiplier:0.0}x", Style(Theme.Mint)));
+            new TextRun(
+                $"{player.SpeedMultiplier:0.0}x",
+                Style(player.IsBoostActive ? Theme.Gold : Theme.Text, bold: player.IsBoostActive)),
+            new TextRun("  ·  ", Style(Theme.Border, dim: true)),
+            skillRun);
     }
 
     private static void DrawBoard(Canvas canvas)
@@ -204,40 +240,46 @@ public sealed class GameRenderer
             new AnsiStyle(Theme.Border));
     }
 
-    private void DrawPlayfield(Canvas canvas, SnakeGame game)
+    private void DrawPlayfield(Canvas canvas, GameWorld world)
     {
-        var snakeCells = new Dictionary<Cell, int>(game.Length);
-        for (int index = 0; index < game.Snake.Count; index++)
+        var snakeCells = new Dictionary<Cell, (int Player, int Index, int Count)>();
+
+        foreach (SnakePlayer player in world.Players)
         {
-            snakeCells[game.Snake[index]] = index;
+            for (int index = 0; index < player.Body.Count; index++)
+            {
+                snakeCells[player.Body[index]] = (player.Index, index, player.Body.Count);
+            }
         }
 
-        for (int y = 0; y < SnakeGame.Height; y++)
+        for (int y = 0; y < GameWorld.Height; y++)
         {
-            for (int x = 0; x < SnakeGame.Width; x++)
+            for (int x = 0; x < GameWorld.Width; x++)
             {
                 var cell = new Cell(x, y);
                 int column = InteriorLeft + x * 2;
                 int row = InteriorTop + y;
 
-                if (snakeCells.TryGetValue(cell, out int index))
+                if (snakeCells.TryGetValue(cell, out var snake))
                 {
-                    if (index == 0)
+                    PlayerColors colors = ColorsFor(snake.Player);
+
+                    if (snake.Index == 0)
                     {
-                        AnsiStyle headStyle = new(Theme.SnakeHead, Bold: true);
+                        AnsiStyle headStyle = new(colors.Head, Bold: true);
                         canvas.Set(column, row, '◉', headStyle);
                         canvas.Set(column + 1, row, '◉', headStyle);
                     }
                     else
                     {
-                        double amount = index / (double)Math.Max(1, game.Length - 1);
-                        Rgb color = Rgb.Lerp(Theme.SnakeBodyNear, Theme.SnakeBodyFar, amount);
+                        double amount = snake.Index / (double)Math.Max(1, snake.Count - 1);
+                        Rgb color = Rgb.Lerp(colors.BodyNear, colors.BodyFar, amount);
                         AnsiStyle bodyStyle = new(color);
                         canvas.Set(column, row, '█', bodyStyle);
                         canvas.Set(column + 1, row, '█', bodyStyle);
                     }
                 }
-                else if (game.Food is { } food && food == cell)
+                else if (world.Food is { } food && food == cell)
                 {
                     canvas.Set(column, row, '◆', new AnsiStyle(Theme.Food, Bold: true));
                 }
@@ -266,7 +308,6 @@ public sealed class GameRenderer
             canvas.Write(x + width / 2 - 1, y - 1, "▼", new AnsiStyle(Theme.Mint, Bold: true));
         }
 
-        // A one-cell drop shadow gives the cards a little depth on dark terminals.
         canvas.FillRect(x + 1, y + 1, width, height, ' ', new AnsiStyle(Background: Theme.Shadow));
         canvas.FillRect(x, y, width, height, ' ', backgroundStyle);
         canvas.DrawBorder(x, y, width, height, borderStyle);
@@ -301,7 +342,7 @@ public sealed class GameRenderer
 
     private void DrawPausedOverlay(Canvas canvas)
     {
-        canvas.DimRegion(InteriorLeft, InteriorTop, InteriorWidth, SnakeGame.Height);
+        canvas.DimRegion(InteriorLeft, InteriorTop, InteriorWidth, GameWorld.Height);
 
         const int width = 46;
         const int height = 8;
@@ -316,42 +357,30 @@ public sealed class GameRenderer
         DrawPanelOption(canvas, optionX, y + 6, "Q", "QUIT");
     }
 
-    private void DrawFinishedOverlay(
-        Canvas canvas,
-        SnakeGame game,
-        int best,
-        bool newBest,
-        bool won)
+    private void DrawRoundOverOverlay(Canvas canvas, GameWorld world, bool newBest)
     {
-        canvas.DimRegion(InteriorLeft, InteriorTop, InteriorWidth, SnakeGame.Height);
+        canvas.DimRegion(InteriorLeft, InteriorTop, InteriorWidth, GameWorld.Height);
 
-        const int width = 50;
+        const int width = 56;
         int height = newBest ? 9 : 8;
-        Rgb accent = won ? Theme.Gold : Theme.Food;
-        (int x, int y) = DrawPanel(canvas, width, height, accent);
+        Rgb accent = world.WinnerIndex switch
+        {
+            0 => Theme.PlayerOne,
+            1 => Theme.PlayerTwo,
+            _ => Theme.Gold,
+        };
+        string title = world.WinnerIndex switch
+        {
+            0 => "PLAYER 1 WINS",
+            1 => "PLAYER 2 WINS",
+            _ => "DRAW",
+        };
 
-        string title = won ? "BOARD CLEARED!" : "GAME OVER";
+        (int x, int y) = DrawPanel(canvas, width, height, accent);
         DrawPanelCentered(canvas, x, width, y + 1, title, accent, bold: true);
 
-        DrawRunsCenteredIn(
-            canvas,
-            x + 1,
-            width - 2,
-            y + 3,
-            new TextRun("SCORE ", Style(Theme.Muted, Theme.Panel)),
-            new TextRun(game.Score.ToString("D4"), Style(Theme.Text, Theme.Panel, bold: true)),
-            new TextRun("     BEST ", Style(Theme.Muted, Theme.Panel)),
-            new TextRun(best.ToString("D4"), Style(Theme.Gold, Theme.Panel, bold: true)));
-
-        DrawRunsCenteredIn(
-            canvas,
-            x + 1,
-            width - 2,
-            y + 4,
-            new TextRun("LEVEL ", Style(Theme.Muted, Theme.Panel)),
-            new TextRun(game.Level.ToString("D2"), Style(Theme.Mint, Theme.Panel)),
-            new TextRun("     LENGTH ", Style(Theme.Muted, Theme.Panel)),
-            new TextRun(game.Length.ToString("D2"), Style(Theme.Text, Theme.Panel)));
+        DrawPanelPlayerLine(canvas, x, width, y + 3, world.Players[0]);
+        DrawPanelPlayerLine(canvas, x, width, y + 4, world.Players[1]);
 
         if (newBest)
         {
@@ -365,17 +394,39 @@ public sealed class GameRenderer
             width - 2,
             actionRow,
             new TextRun("SPACE", Style(Theme.Mint, Theme.Panel, bold: true)),
-            new TextRun("  AGAIN      ", Style(Theme.Muted, Theme.Panel)),
+            new TextRun("  REMATCH      ", Style(Theme.Muted, Theme.Panel)),
             new TextRun("M", Style(Theme.Mint, Theme.Panel, bold: true)),
             new TextRun("  MENU      ", Style(Theme.Muted, Theme.Panel)),
             new TextRun("Q", Style(Theme.Mint, Theme.Panel, bold: true)),
             new TextRun("  QUIT", Style(Theme.Muted, Theme.Panel)));
     }
 
+    private static void DrawPanelPlayerLine(
+        Canvas canvas,
+        int panelX,
+        int panelWidth,
+        int y,
+        SnakePlayer player)
+    {
+        PlayerColors colors = ColorsFor(player.Index);
+        DrawRunsCenteredIn(
+            canvas,
+            panelX + 1,
+            panelWidth - 2,
+            y,
+            new TextRun($"P{player.Index + 1}", Style(colors.Accent, Theme.Panel, bold: true)),
+            new TextRun("  SCORE ", Style(Theme.Muted, Theme.Panel)),
+            new TextRun(player.Score.ToString("D4"), Style(Theme.Text, Theme.Panel, bold: true)),
+            new TextRun("    LEN ", Style(Theme.Muted, Theme.Panel)),
+            new TextRun(player.Length.ToString("D2"), Style(Theme.Text, Theme.Panel)),
+            new TextRun("    LV ", Style(Theme.Muted, Theme.Panel)),
+            new TextRun(player.Level.ToString("D2"), Style(Theme.Mint, Theme.Panel)));
+    }
+
     private (int X, int Y) DrawPanel(Canvas canvas, int width, int height, Rgb border)
     {
         int x = InteriorLeft + (InteriorWidth - width) / 2;
-        int y = InteriorTop + (SnakeGame.Height - height) / 2;
+        int y = InteriorTop + (GameWorld.Height - height) / 2;
 
         canvas.FillRect(
             x + 1,
@@ -473,7 +524,12 @@ public sealed class GameRenderer
     private static AnsiStyle Style(Rgb foreground, Rgb background, bool bold = false, bool dim = false) =>
         new(foreground, background, bold, dim);
 
+    private static PlayerColors ColorsFor(int playerIndex) =>
+        playerIndex == 0 ? Theme.PlayerOneColors : Theme.PlayerTwoColors;
+
     private readonly record struct TextRun(string Text, AnsiStyle Style);
+
+    private readonly record struct PlayerColors(Rgb Accent, Rgb Head, Rgb BodyNear, Rgb BodyFar);
 
     private static class Theme
     {
@@ -485,12 +541,24 @@ public sealed class GameRenderer
         public static readonly Rgb Food = new(255, 99, 105);
         public static readonly Rgb Gold = new(255, 207, 102);
         public static readonly Rgb Ink = new(6, 25, 14);
-        public static readonly Rgb SnakeHead = new(225, 255, 235);
-        public static readonly Rgb SnakeBodyNear = new(101, 238, 145);
-        public static readonly Rgb SnakeBodyFar = new(27, 116, 70);
         public static readonly Rgb Card = new(10, 17, 14);
         public static readonly Rgb SelectedCard = new(14, 35, 24);
         public static readonly Rgb Shadow = new(4, 7, 6);
         public static readonly Rgb Panel = new(12, 24, 18);
+
+        public static readonly Rgb PlayerOne = new(113, 241, 154);
+        public static readonly Rgb PlayerTwo = new(99, 216, 255);
+
+        public static readonly PlayerColors PlayerOneColors = new(
+            PlayerOne,
+            new Rgb(226, 255, 235),
+            new Rgb(96, 235, 140),
+            new Rgb(24, 110, 65));
+
+        public static readonly PlayerColors PlayerTwoColors = new(
+            PlayerTwo,
+            new Rgb(226, 251, 255),
+            new Rgb(88, 204, 244),
+            new Rgb(20, 88, 118));
     }
 }

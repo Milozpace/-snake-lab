@@ -5,13 +5,16 @@ namespace Snake;
 
 public sealed class GameApp : IDisposable
 {
+    private const int SimulationStepMs = 5;
+    private const int MaxSimulationStepsPerFrame = 8;
+    private const int HudRefreshMs = 100;
+
     private enum Screen
     {
         Menu,
         Playing,
         Paused,
-        GameOver,
-        Won,
+        RoundOver,
     }
 
     private readonly HighScoreStore _scores;
@@ -20,14 +23,16 @@ public sealed class GameApp : IDisposable
     private readonly Stopwatch _clock = Stopwatch.StartNew();
 
     private Difficulty _selectedDifficulty = Difficulty.Classic;
-    private SnakeGame? _game;
+    private GameWorld? _world;
     private Screen _screen = Screen.Menu;
     private bool _newBest;
     private bool _scoreCommitted;
     private bool _dirty = true;
     private bool _tooSmall;
     private volatile bool _quitRequested;
-    private long _lastTickMs;
+    private long _lastFrameMs;
+    private long _simAccumulatorMs;
+    private long _nextHudRefreshMs;
     private long _nextResizeCheckMs;
     private int _lastTerminalWidth;
     private int _lastTerminalHeight;
@@ -50,6 +55,11 @@ public sealed class GameApp : IDisposable
             _tooSmall = _lastTerminalWidth < TerminalSession.MinimumWidth
                 || _lastTerminalHeight < TerminalSession.MinimumHeight;
 
+            long initialNow = _clock.ElapsedMilliseconds;
+            _lastFrameMs = initialNow;
+            _nextResizeCheckMs = initialNow + 100;
+            _nextHudRefreshMs = initialNow;
+
             while (!_quitRequested)
             {
                 PollInput();
@@ -66,19 +76,28 @@ public sealed class GameApp : IDisposable
                     _nextResizeCheckMs = now + 100;
                 }
 
-                if (_screen == Screen.Playing && !_tooSmall && _game is not null)
+                if (_screen == Screen.Playing && !_tooSmall && _world is not null)
                 {
-                    if (now - _lastTickMs >= _game.TickIntervalMs)
-                    {
-                        _game.Advance();
-                        _lastTickMs = now;
-                        _dirty = true;
+                    RunSimulation(now);
 
-                        if (_game.IsGameOver || _game.IsWon)
-                        {
-                            FinishGame();
-                        }
+                    if (_world.IsOver)
+                    {
+                        FinishRound();
                     }
+
+                    if (now >= _nextHudRefreshMs)
+                    {
+                        // The HUD contains boost/cooldown countdowns. Refreshing
+                        // at 10 Hz keeps those smooth without rendering on every
+                        // 5 ms simulation step.
+                        _dirty = true;
+                        _nextHudRefreshMs = now + HudRefreshMs;
+                    }
+                }
+                else
+                {
+                    _lastFrameMs = now;
+                    _simAccumulatorMs = 0;
                 }
 
                 if (_dirty)
@@ -87,7 +106,7 @@ public sealed class GameApp : IDisposable
                     _dirty = false;
                 }
 
-                Thread.Sleep(3);
+                Thread.Sleep(2);
             }
         }
         catch (InvalidOperationException)
@@ -100,12 +119,48 @@ public sealed class GameApp : IDisposable
         }
         finally
         {
-            CommitScoreIfNeeded();
+            CommitScoresIfNeeded();
             Console.CancelKeyPress -= OnCancelKeyPress;
             _terminal.Dispose();
         }
 
         return 0;
+    }
+
+    private void RunSimulation(long now)
+    {
+        if (_world is null)
+        {
+            return;
+        }
+
+        long elapsed = Math.Max(0, now - _lastFrameMs);
+        _lastFrameMs = now;
+        _simAccumulatorMs += elapsed;
+
+        int steps = 0;
+        bool changed = false;
+
+        while (_simAccumulatorMs >= SimulationStepMs
+               && steps < MaxSimulationStepsPerFrame
+               && !_world.IsOver)
+        {
+            changed |= _world.Update(SimulationStepMs);
+            _simAccumulatorMs -= SimulationStepMs;
+            steps++;
+        }
+
+        if (steps == MaxSimulationStepsPerFrame)
+        {
+            // Drop leftover backlog after a long stall instead of making the
+            // snakes teleport through several cells on later frames.
+            _simAccumulatorMs = 0;
+        }
+
+        if (changed)
+        {
+            _dirty = true;
+        }
     }
 
     private void PollInput()
@@ -148,9 +203,8 @@ public sealed class GameApp : IDisposable
             case Screen.Paused:
                 HandlePausedKey(key);
                 break;
-            case Screen.GameOver:
-            case Screen.Won:
-                HandleFinishedKey(key);
+            case Screen.RoundOver:
+                HandleRoundOverKey(key);
                 break;
         }
     }
@@ -192,23 +246,52 @@ public sealed class GameApp : IDisposable
 
     private void HandlePlayingKey(ConsoleKeyInfo key)
     {
-        Direction? direction = key.Key switch
+        Direction? playerOneTurn = key.Key switch
         {
-            ConsoleKey.UpArrow or ConsoleKey.W => Direction.Up,
-            ConsoleKey.DownArrow or ConsoleKey.S => Direction.Down,
-            ConsoleKey.LeftArrow or ConsoleKey.A => Direction.Left,
-            ConsoleKey.RightArrow or ConsoleKey.D => Direction.Right,
+            ConsoleKey.W => Direction.Up,
+            ConsoleKey.S => Direction.Down,
+            ConsoleKey.A => Direction.Left,
+            ConsoleKey.D => Direction.Right,
             _ => null,
         };
 
-        if (direction is { } turn && _game is not null)
+        if (playerOneTurn is { } turnOne && _world is not null)
         {
-            _game.TryTurn(turn);
+            _world.TryTurn(0, turnOne);
+            return;
+        }
+
+        Direction? playerTwoTurn = key.Key switch
+        {
+            ConsoleKey.UpArrow => Direction.Up,
+            ConsoleKey.DownArrow => Direction.Down,
+            ConsoleKey.LeftArrow => Direction.Left,
+            ConsoleKey.RightArrow => Direction.Right,
+            _ => null,
+        };
+
+        if (playerTwoTurn is { } turnTwo && _world is not null)
+        {
+            _world.TryTurn(1, turnTwo);
             return;
         }
 
         switch (key.Key)
         {
+            case ConsoleKey.E:
+                if (_world?.TryActivateBoost(0) == true)
+                {
+                    _dirty = true;
+                }
+
+                break;
+            case ConsoleKey.O:
+                if (_world?.TryActivateBoost(1) == true)
+                {
+                    _dirty = true;
+                }
+
+                break;
             case ConsoleKey.P:
             case ConsoleKey.Escape:
                 PauseGame();
@@ -240,7 +323,7 @@ public sealed class GameApp : IDisposable
         }
     }
 
-    private void HandleFinishedKey(ConsoleKeyInfo key)
+    private void HandleRoundOverKey(ConsoleKeyInfo key)
     {
         switch (key.Key)
         {
@@ -289,25 +372,30 @@ public sealed class GameApp : IDisposable
 
     private void StartGame()
     {
-        CommitScoreIfNeeded();
+        CommitScoresIfNeeded();
 
-        _game = new SnakeGame(_selectedDifficulty);
+        _world = new GameWorld(_selectedDifficulty);
         _screen = Screen.Playing;
         _newBest = false;
         _scoreCommitted = false;
-        _lastTickMs = _clock.ElapsedMilliseconds;
+
+        long now = _clock.ElapsedMilliseconds;
+        _lastFrameMs = now;
+        _simAccumulatorMs = 0;
+        _nextHudRefreshMs = now;
         _dirty = true;
     }
 
     private void PauseGame()
     {
-        if (_screen != Screen.Playing || _game is null)
+        if (_screen != Screen.Playing || _world is null)
         {
             return;
         }
 
-        _game.ClearPendingTurns();
+        _world.ClearPendingTurns();
         _screen = Screen.Paused;
+        _simAccumulatorMs = 0;
         _dirty = true;
     }
 
@@ -318,41 +406,47 @@ public sealed class GameApp : IDisposable
             return;
         }
 
+        long now = _clock.ElapsedMilliseconds;
         _screen = Screen.Playing;
-        _lastTickMs = _clock.ElapsedMilliseconds;
+        _lastFrameMs = now;
+        _simAccumulatorMs = 0;
+        _nextHudRefreshMs = now;
         _dirty = true;
     }
 
-    private void FinishGame()
+    private void FinishRound()
     {
-        if (_game is null)
+        if (_world is null)
         {
             return;
         }
 
-        _newBest = _scores.UpdateBest(_game.Difficulty, _game.Score);
+        int bestScore = Math.Max(_world.Players[0].Score, _world.Players[1].Score);
+        _newBest = _scores.UpdateBest(_world.Difficulty, bestScore);
         _scoreCommitted = true;
-        _screen = _game.IsWon ? Screen.Won : Screen.GameOver;
+        _screen = Screen.RoundOver;
+        _simAccumulatorMs = 0;
         _dirty = true;
     }
 
     private void ReturnToMenu()
     {
-        CommitScoreIfNeeded();
-        _game = null;
+        CommitScoresIfNeeded();
+        _world = null;
         _screen = Screen.Menu;
         _newBest = false;
         _dirty = true;
     }
 
-    private void CommitScoreIfNeeded()
+    private void CommitScoresIfNeeded()
     {
-        if (_game is null || _scoreCommitted)
+        if (_world is null || _scoreCommitted)
         {
             return;
         }
 
-        _scores.UpdateBest(_game.Difficulty, _game.Score);
+        int bestScore = Math.Max(_world.Players[0].Score, _world.Players[1].Score);
+        _scores.UpdateBest(_world.Difficulty, bestScore);
         _scoreCommitted = true;
     }
 
@@ -373,7 +467,8 @@ public sealed class GameApp : IDisposable
             _tooSmall = small;
             if (!small)
             {
-                _lastTickMs = now;
+                _lastFrameMs = now;
+                _simAccumulatorMs = 0;
             }
 
             _dirty = true;
@@ -394,7 +489,7 @@ public sealed class GameApp : IDisposable
         }
         else
         {
-            if (_game is null)
+            if (_world is null)
             {
                 return;
             }
@@ -402,16 +497,11 @@ public sealed class GameApp : IDisposable
             GameOverlay overlay = _screen switch
             {
                 Screen.Paused => GameOverlay.Paused,
-                Screen.GameOver => GameOverlay.GameOver,
-                Screen.Won => GameOverlay.Won,
+                Screen.RoundOver => GameOverlay.RoundOver,
                 _ => GameOverlay.None,
             };
 
-            canvas = _renderer.BuildGame(
-                _game,
-                _scores.GetBest(_game.Difficulty),
-                overlay,
-                _newBest);
+            canvas = _renderer.BuildGame(_world, overlay, _newBest);
         }
 
         _terminal.Render(canvas);

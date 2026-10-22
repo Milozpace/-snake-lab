@@ -2,11 +2,19 @@ namespace Snake;
 
 internal static class Program
 {
+    private const string Version = "2.0.0";
+
     public static int Main(string[] args)
     {
         if (args.Contains("--help") || args.Contains("-h"))
         {
             PrintHelp();
+            return 0;
+        }
+
+        if (args.Contains("--version"))
+        {
+            Console.WriteLine($"SNAKE {Version}");
             return 0;
         }
 
@@ -49,26 +57,29 @@ internal static class Program
         {
             Console.Error.WriteLine();
             Console.Error.WriteLine($"SNAKE could not start: {exception.Message}");
-            Console.Error.WriteLine("Try resizing the terminal or running: dotnet run --no-color");
+            Console.Error.WriteLine("Try resizing the terminal or running: dotnet run -- --no-color");
             return 1;
         }
     }
 
     private static void PrintHelp()
     {
-        Console.WriteLine("SNAKE — a terminal arcade game in C#");
+        Console.WriteLine($"SNAKE {Version} — a local two-player terminal battle");
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  dotnet run                 Play");
         Console.WriteLine("  dotnet run -- --no-color   Play without colors");
         Console.WriteLine("  dotnet run -- --self-test  Run the built-in logic and layout checks");
+        Console.WriteLine("  dotnet run -- --version    Show the version");
         Console.WriteLine();
         Console.WriteLine("Controls:");
-        Console.WriteLine("  WASD / arrow keys   steer");
-        Console.WriteLine("  P / Esc             pause");
-        Console.WriteLine("  Space               start / play again");
-        Console.WriteLine("  Ctrl+C              quit");
+        Console.WriteLine("  Player 1   W A S D to steer, E for boost");
+        Console.WriteLine("  Player 2   arrow keys to steer, O for boost");
+        Console.WriteLine("  P / Esc    pause");
+        Console.WriteLine("  Space      start / rematch");
+        Console.WriteLine("  Ctrl+C     quit");
         Console.WriteLine();
+        Console.WriteLine("Boost: 2 seconds of speed, 7 second cooldown.");
         Console.WriteLine("Scores are saved under your local application-data folder.");
     }
 }

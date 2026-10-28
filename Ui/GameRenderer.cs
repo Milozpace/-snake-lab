@@ -5,6 +5,7 @@ public enum GameOverlay
     None,
     Paused,
     RoundOver,
+    OnlineRoundOver,
 }
 
 /// <summary>
@@ -109,7 +110,7 @@ public sealed class GameRenderer
         return canvas;
     }
 
-    public Canvas BuildGame(GameWorld world, GameOverlay overlay, bool newBest)
+    public Canvas BuildGame(IGameView world, GameOverlay overlay, bool newBest)
     {
         var canvas = new Canvas(CanvasWidth, CanvasHeight, _useColor);
         DrawLogo(canvas);
@@ -128,7 +129,10 @@ public sealed class GameRenderer
                 DrawPausedOverlay(canvas);
                 break;
             case GameOverlay.RoundOver:
-                DrawRoundOverOverlay(canvas, world, newBest);
+                DrawRoundOverOverlay(canvas, world, newBest, online: false);
+                break;
+            case GameOverlay.OnlineRoundOver:
+                DrawRoundOverOverlay(canvas, world, newBest: false, online: true);
                 break;
         }
 
@@ -159,6 +163,13 @@ public sealed class GameRenderer
                 new("Q", Style(Theme.Mint)),
                 new("  QUIT", Style(Theme.Muted)),
             ],
+            GameOverlay.OnlineRoundOver =>
+            [
+                new("ENTER", Style(Theme.Mint)),
+                new("  REMATCH     ", Style(Theme.Muted)),
+                new("ESC", Style(Theme.Mint)),
+                new("  QUIT", Style(Theme.Muted)),
+            ],
             _ =>
             [
                 new("P1 WASD + E", Style(Theme.PlayerOne)),
@@ -180,7 +191,7 @@ public sealed class GameRenderer
             new TextRun("◆", Style(Theme.Food, bold: true)));
     }
 
-    private void DrawPlayerHud(Canvas canvas, int row, SnakePlayer player)
+    private void DrawPlayerHud(Canvas canvas, int row, IPlayerView player)
     {
         PlayerColors colors = ColorsFor(player.Index);
         string key = player.Index == 0 ? "E" : "O";
@@ -240,11 +251,11 @@ public sealed class GameRenderer
             new AnsiStyle(Theme.Border));
     }
 
-    private void DrawPlayfield(Canvas canvas, GameWorld world)
+    private void DrawPlayfield(Canvas canvas, IGameView world)
     {
         var snakeCells = new Dictionary<Cell, (int Player, int Index, int Count)>();
 
-        foreach (SnakePlayer player in world.Players)
+        foreach (IPlayerView player in world.Players)
         {
             for (int index = 0; index < player.Body.Count; index++)
             {
@@ -357,7 +368,7 @@ public sealed class GameRenderer
         DrawPanelOption(canvas, optionX, y + 6, "Q", "QUIT");
     }
 
-    private void DrawRoundOverOverlay(Canvas canvas, GameWorld world, bool newBest)
+    private void DrawRoundOverOverlay(Canvas canvas, IGameView world, bool newBest, bool online)
     {
         canvas.DimRegion(InteriorLeft, InteriorTop, InteriorWidth, GameWorld.Height);
 
@@ -388,17 +399,32 @@ public sealed class GameRenderer
         }
 
         int actionRow = y + (newBest ? 7 : 6);
-        DrawRunsCenteredIn(
-            canvas,
-            x + 1,
-            width - 2,
-            actionRow,
-            new TextRun("SPACE", Style(Theme.Mint, Theme.Panel, bold: true)),
-            new TextRun("  REMATCH      ", Style(Theme.Muted, Theme.Panel)),
-            new TextRun("M", Style(Theme.Mint, Theme.Panel, bold: true)),
-            new TextRun("  MENU      ", Style(Theme.Muted, Theme.Panel)),
-            new TextRun("Q", Style(Theme.Mint, Theme.Panel, bold: true)),
-            new TextRun("  QUIT", Style(Theme.Muted, Theme.Panel)));
+        if (online)
+        {
+            DrawRunsCenteredIn(
+                canvas,
+                x + 1,
+                width - 2,
+                actionRow,
+                new TextRun("ENTER", Style(Theme.Mint, Theme.Panel, bold: true)),
+                new TextRun("  REMATCH      ", Style(Theme.Muted, Theme.Panel)),
+                new TextRun("ESC", Style(Theme.Mint, Theme.Panel, bold: true)),
+                new TextRun("  QUIT", Style(Theme.Muted, Theme.Panel)));
+        }
+        else
+        {
+            DrawRunsCenteredIn(
+                canvas,
+                x + 1,
+                width - 2,
+                actionRow,
+                new TextRun("SPACE", Style(Theme.Mint, Theme.Panel, bold: true)),
+                new TextRun("  REMATCH      ", Style(Theme.Muted, Theme.Panel)),
+                new TextRun("M", Style(Theme.Mint, Theme.Panel, bold: true)),
+                new TextRun("  MENU      ", Style(Theme.Muted, Theme.Panel)),
+                new TextRun("Q", Style(Theme.Mint, Theme.Panel, bold: true)),
+                new TextRun("  QUIT", Style(Theme.Muted, Theme.Panel)));
+        }
     }
 
     private static void DrawPanelPlayerLine(
@@ -406,7 +432,7 @@ public sealed class GameRenderer
         int panelX,
         int panelWidth,
         int y,
-        SnakePlayer player)
+        IPlayerView player)
     {
         PlayerColors colors = ColorsFor(player.Index);
         DrawRunsCenteredIn(

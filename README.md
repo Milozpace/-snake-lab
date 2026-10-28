@@ -1,12 +1,12 @@
-# SNAKE 2 · 双人终端贪吃蛇
+# SNAKE 3 · 本地与 MQTT 双人终端贪吃蛇
 
-一个用 **C# / .NET 10** 编写的本地双人对战贪吃蛇。两名玩家共享同一张棋盘和食物，各自拥有独立的移动速度、等级与主动加速技能。无第三方 NuGet 依赖。
+一个用 **C# / .NET 10** 编写的双人终端贪吃蛇。既支持同一台机器上的本地对战，也支持通过 **MQTT** 联机。两名玩家共享同一张棋盘和食物，各自拥有独立的移动速度、等级与主动加速技能。
 
-![SNAKE 2 对战画面](preview.png)
+![SNAKE 本地对战画面](preview.png)
 
 ## 运行
 
-需要 [.NET SDK 10.0](https://dotnet.microsoft.com/download) 或更高版本，以及支持 UTF-8 / 24 位色的交互式终端。
+需要 [.NET SDK 10.0](https://dotnet.microsoft.com/download)，以及支持 UTF-8 / 24 位色的交互式终端。项目通过 NuGet 引入 MQTTnet。
 
 ```bash
 cd /home/yukiko/Project/Lab/snake
@@ -15,83 +15,155 @@ dotnet run
 
 终端至少需要 **76 × 22** 个字符，推荐 80 × 24 或更大。窗口过小时游戏会自动冻结并提示调整大小。
 
-### 启动参数
+## 本地双人
 
 ```bash
-dotnet run -- --no-color     # 关闭颜色
-dotnet run -- --self-test    # 运行内置逻辑 / 布局自检
-dotnet run -- --version      # 显示版本
-dotnet run -- --help
+dotnet run
 ```
 
-`--` 是让 `dotnet run` 把后续参数转交给游戏。
-
-## 操作
+- 主菜单用 `←` / `→` 或 `A` / `D` 选择难度
+- `1` / `2` / `3` 直接选择 CHILL / CLASSIC / TURBO
+- `Space` / `Enter` 开始
 
 | 玩家 | 移动 | 加速技能 |
 | --- | --- | --- |
 | **P1（绿色）** | `W` `A` `S` `D` | `E` |
 | **P2（蓝色）** | 方向键 | `O` |
 
-公共按键：
+游戏中 `P` / `Esc` 暂停；结束后 `Space` / `Enter` / `R` 再来一局，`M` 回菜单，`Q` 退出。
 
-| 场景 | 按键 | 作用 |
+## MQTT 联机
+
+联机采用 **Host 权威**模式：
+
+```text
+Host：运行完整游戏模拟，定期发布棋盘快照
+Guest：不运行模拟，只发送输入并渲染 Host 的快照
+```
+
+### 1. 启动 Host
+
+```bash
+dotnet run -- --host
+```
+
+Host 会连接默认 broker `broker.emqx.io:1883`，创建随机房间码并显示在联机大厅里。
+
+也可以指定房间、难度和本地 broker：
+
+```bash
+dotnet run -- --host --room TEST1 --difficulty classic --broker localhost:1883
+```
+
+### 2. 启动 Guest
+
+在另一台终端或另一台电脑上：
+
+```bash
+dotnet run -- --join TEST1 --broker localhost:1883
+```
+
+如果 Host 连接的是默认 broker，省略 `--broker` 即可：
+
+```bash
+dotnet run -- --join TEST1
+```
+
+Guest 加入后对局自动开始。
+
+### 离线测试（本机 Mosquitto）
+
+```bash
+# 终端 1：启动 broker
+mosquitto -p 1883
+
+# 终端 2：Host
+dotnet run -- --host --room TEST1 --broker localhost:1883
+
+# 终端 3：Guest
+dotnet run -- --join TEST1 --broker localhost:1883
+```
+
+### 联机操作
+
+| 角色 | 移动 | 加速技能 |
 | --- | --- | --- |
-| 主菜单 | `←` / `→` 或 `A` / `D` | 切换难度 |
-| 主菜单 | `1` / `2` / `3` | 直接选择 CHILL / CLASSIC / TURBO |
-| 主菜单 | `Space` / `Enter` | 开始对战 |
-| 游戏中 | `P` / `Esc` | 暂停 |
-| 游戏结束 | `Space` / `Enter` / `R` | 再来一局 |
-| 暂停 / 结束 | `M` | 回主菜单 |
-| 暂停 / 结束 | `Q` | 退出 |
-| 任意时刻 | `Ctrl+C` | 退出并恢复终端 |
+| **Host / P1** | `W` `A` `S` `D` | `E` |
+| **Guest / P2** | 方向键 | `O` |
+
+- `Esc`：退出联机
+- 结算后 `Enter` / `Space` / `R`：请求或发起重赛
+- 联机模式暂不支持暂停，避免双方的模拟时间不一致
+
+### Broker 配置
+
+```bash
+--broker HOST[:PORT]
+```
+
+默认连接 `broker.emqx.io:1883`。也可以设置环境变量：
+
+```bash
+export SNAKE_MQTT_BROKER=localhost:1883
+```
+
+当前版本使用未加密的 MQTT TCP 连接，也没有 broker 用户名/密码认证。公共 broker 上的房间码不是安全边界，不要传输敏感数据；正式使用请换成自己的 broker 并谨慎处理房间码。
+
+## 启动参数
+
+```bash
+dotnet run                                   # 本地双人
+dotnet run -- --host                         # 创建 MQTT 房间
+dotnet run -- --host --room CODE             # 指定房间码
+dotnet run -- --join CODE                    # 加入 MQTT 房间
+dotnet run -- --broker HOST[:PORT]           # 指定 broker
+dotnet run -- --difficulty chill|classic|turbo
+dotnet run -- --no-color
+dotnet run -- --self-test
+dotnet run -- --version
+dotnet run -- --help
+```
+
+`--` 是让 `dotnet run` 把后续参数转交给游戏。
+
+## MQTT 消息设计
+
+- 主题前缀：`snake/v3/{room}/...`
+- Host → Guest：`host` 主题，发布完整 `state` 快照
+- Guest → Host：`guest` 主题，发布 `hello`、`input`、`rematch`
+- 快照约每 **50 ms** 发送一次，包含：
+  - 棋盘、食物、难度
+  - 两条蛇的身体、分数、等级、存活状态
+  - 加速技能的剩余时间与速度倍率
+  - 胜负结果与序列号
+- Guest 会忽略比自己已收到快照更旧的序列号
+
+联机时 Host 的主循环仍按 **5 ms 固定步长**模拟；Guest 只负责输入与显示，不自行推进世界。
 
 ## 玩法
 
 - 两名玩家共享一颗食物；吃到食物 **+10 分**，身体增长一节。
-- 每名玩家 **每吃 4 颗食物升一级**，缩短自己的移动间隔。两人速度会因此逐渐不同。
+- 每名玩家 **每吃 4 颗食物升一级**，缩短自己的移动间隔。
 - 撞墙、撞到自己或撞到对方身体都会死亡；蛇尾正在移开的格子可以安全进入。
-- 两条蛇同时撞上同一格、发生头对头或头交换碰撞时，判定为 **DRAW**。
+- 两条蛇同时撞上同一格、发生头对头或头交换碰撞时判定为 **DRAW**。
 - 一方死亡时另一方立刻获胜；没有时间限制。
-- 三档难度：
-
-  | 难度 | 初始移动间隔 | 特点 |
-  | --- | --- | --- |
-  | CHILL | 190 ms | 慢节奏 |
-  | CLASSIC | 145 ms | 经典手感 |
-  | TURBO | 100 ms | 高节奏 |
+- 三档难度：CHILL / CLASSIC / TURBO。
 
 ## 主动加速技能
 
-按 `E` / `O` 发动：
-
-- **持续 2 秒**，移动间隔缩短为当前速度的约 55%（显示约 `1.8x`）。
-- **冷却 7 秒**，从按下技能开始计算，持续期间不能再次发动。
-- 技能状态会按 `BOOST 1.8s` / `COOLDOWN 5.2s` / `BOOST READY [E]` 显示在各自 HUD 上。
-- 暂停时技能持续时间和冷却都会冻结；已死亡的玩家技能立即结束。
-- 加速只提高移动频率，**每次逻辑步仍然只移动一格**，不会跳过碰撞检查。
-
-## 时间与刷新模型
-
-这一版没有为每个玩家开线程或独立计时器：
-
-- 主循环使用一个持续运行的 `Stopwatch`。
-- 用累加器把真实时间切成 **5 ms 的固定模拟步**。
-- 每名玩家维护自己的 `MoveCooldownMs`，到期才请求移动；因此速度不同。
-- 同一 5 ms 步内到期的蛇会被放到同一个批次结算，保证头对头和同时碰撞规则一致。
-- 加速持续/冷却也以固定模拟步递减，所以暂停、窗口过小或游戏结束时都会同步冻结。
-- 只有逻辑状态变化或 100 ms HUD 刷新计时到期时才重绘画布；渲染与模拟解耦。
-
-画布固定为 74 × 22 个终端单元格。每帧重新合成整张画布，再用一次 `Console.Write` 写入 ANSI 真彩色输出；进入终端备用屏幕，退出时恢复。
+- **持续 2 秒**，移动间隔缩短为当前速度的约 55%（约 `1.8x`）。
+- **冷却 7 秒**，从按下技能开始计算。
+- HUD 显示 `BOOST` / `COOLDOWN` / `BOOST READY`。
+- 加速只提高移动频率，每次逻辑步仍然只移动一格。
 
 ## 最高分
 
-每个难度分别保存最高分，取双方本局得分中的较高者。新纪录会在结算界面显示。
+本地对战会按难度保存最高分，取双方本局得分中的较高者：
 
 - Linux：`${XDG_DATA_HOME:-~/.local/share}/snake-terminal/highscores.txt`
 - Windows：`%LOCALAPPDATA%\snake-terminal\highscores.txt`
 
-删除该文件即可重置。中途退出或重开也会提交当前最高分。
+MQTT 联机对局不会写入本地最高分。
 
 ## 自检
 
@@ -99,27 +171,31 @@ dotnet run -- --help
 dotnet run -- --self-test
 ```
 
-自检覆盖双人初始状态、独立移动/转向、食物计分与生长、等级导致的速度差异、加速持续时间与冷却、撞墙胜负、对撞平局、双人 HUD/菜单/结算布局，以及最高分持久化。当前 **9 项全部通过**。
+自检覆盖本地双人逻辑、碰撞与加速、菜单/HUD/结算布局、最高分持久化，以及 MQTT 快照的序列化/反序列化和联机结算界面。当前 **10 项全部通过**。
 
 ## 项目结构
 
 | 文件 | 职责 |
 | --- | --- |
-| `Program.cs` | 入口、参数、终端环境检测 |
-| `GameApp.cs` | 主循环、输入分发、固定步长模拟、暂停/重开 |
+| `Program.cs` | 入口、CLI 参数、broker/房间解析 |
+| `GameApp.cs` | 本地双人主循环、输入、暂停/重开 |
 | `GameWorld.cs` | 共享棋盘、食物、双人碰撞、胜负判定 |
-| `SnakePlayer.cs` | 单条蛇的身体、转向、等级、移动与技能冷却 |
-| `GameTypes.cs` | 方向、坐标、难度配置 |
-| `HighScoreStore.cs` | 分难度最高分持久化 |
-| `Ui/GameRenderer.cs` | 菜单、双人 HUD、棋盘、暂停与结算面板 |
-| `Ui/Canvas.cs` | 无依赖字符画布与 ANSI 真彩色渲染 |
+| `SnakePlayer.cs` | 单条蛇的身体、转向、等级、速度与技能冷却 |
+| `NetworkGameApp.cs` | MQTT Host/Guest 会话、大厅、快照广播与远程输入 |
+| `MqttTransport.cs` | MQTTnet 连接、订阅、发布与入站消息队列 |
+| `NetworkProtocol.cs` | MQTT 消息、房间主题与可序列化世界快照 |
+| `IGameView.cs` | 实时世界与 Guest 快照共用的渲染接口 |
+| `Ui/GameRenderer.cs` | 菜单、HUD、棋盘、暂停/结算界面 |
+| `Ui/Canvas.cs` | 字符画布与 ANSI 真彩色渲染 |
 | `Ui/TerminalSession.cs` | 备用屏幕、居中输出、窗口尺寸与终端恢复 |
+| `HighScoreStore.cs` | 本地最高分持久化 |
 | `SelfTest.cs` | 内置无依赖测试 |
 
 ## Git 版本
 
-- `v1.0`：单人版，包含三档难度、等级加速和最高分。
-- `v2.0`：本地双人对战，独立速度、主动加速技能、共享食物与碰撞结算。
+- `v1.0`：单人版
+- `v2.0`：本地双人对战、独立速度、主动加速技能
+- `v3.0`：MQTT 主机权威联机、大厅、远程输入、在线结算与重赛
 
 ```bash
 git log --oneline --decorate

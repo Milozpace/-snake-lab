@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Snake.Ui;
 
 namespace Snake;
@@ -159,6 +160,46 @@ internal static class SelfTest
             Assert(finishedText.Contains("DRAW", StringComparison.Ordinal), "draw title");
             Assert(finishedText.Contains("NEW HIGH SCORE!", StringComparison.Ordinal), "new-record banner");
             Assert(finishedText.Contains("REMATCH", StringComparison.Ordinal), "rematch action");
+        });
+
+        Test("online snapshots serialize and render", () =>
+        {
+            GameWorld world = NewWorld();
+            OnlineGameSnapshot snapshot = OnlineGameSnapshot.Capture(world, 7);
+            var envelope = new NetworkEnvelope
+            {
+                Type = NetworkMessageTypes.State,
+                Room = "TEST",
+                State = snapshot,
+                Direction = Direction.Up,
+            };
+
+            string json = JsonSerializer.Serialize(envelope, NetworkProtocol.JsonOptions);
+            NetworkEnvelope parsed = JsonSerializer.Deserialize<NetworkEnvelope>(
+                json,
+                NetworkProtocol.JsonOptions)!;
+
+            OnlineGameSnapshot parsedState = parsed.State!;
+            AssertEqual(NetworkProtocol.Version, parsed.Protocol, "protocol version");
+            Assert(parsed.Room == "TEST", "room");
+            AssertEqual(7L, parsedState.Sequence, "snapshot sequence");
+            AssertEqual(world.Difficulty, parsedState.Difficulty, "difficulty");
+            Assert(world.Food == parsedState.Food, "food");
+            AssertEqual(2, ((IGameView)parsedState).Players.Count, "snapshot players");
+            AssertEqual(world.Players[0].Body[0], parsedState.PlayerStates[0].Body[0], "P1 head");
+
+            parsedState.IsOver = true;
+            parsedState.WinnerIndex = -1;
+            var renderer = new GameRenderer(useColor: false);
+            Canvas onlineResult = renderer.BuildGame(
+                parsedState,
+                GameOverlay.OnlineRoundOver,
+                newBest: false);
+            AssertCanvas(onlineResult);
+
+            string text = string.Join('\n', onlineResult.RenderLines());
+            Assert(text.Contains("DRAW", StringComparison.Ordinal), "online draw title");
+            Assert(text.Contains("ENTER", StringComparison.Ordinal), "online rematch key");
         });
 
         Test("high scores persist", () =>

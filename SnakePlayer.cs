@@ -5,7 +5,7 @@ namespace Snake;
 /// boost skill are all owned by the player; collision and board state live in
 /// <see cref="GameWorld"/>.
 /// </summary>
-public sealed class SnakePlayer
+public sealed class SnakePlayer : IPlayerView
 {
     public const int BoostDurationMs = 2_000;
     public const int BoostCooldownMs = 7_000;

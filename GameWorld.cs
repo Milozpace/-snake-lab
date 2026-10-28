@@ -5,7 +5,7 @@ namespace Snake;
 /// step, but each owns an independent movement cooldown, so their effective
 /// speeds can differ because of leveling and the boost skill.
 /// </summary>
-public sealed class GameWorld
+public sealed class GameWorld : IGameView
 {
     public const int Width = 36;
     public const int Height = 16;
@@ -53,6 +53,8 @@ public sealed class GameWorld
     public Difficulty Difficulty { get; }
 
     public IReadOnlyList<SnakePlayer> Players => _players;
+
+    IReadOnlyList<IPlayerView> IGameView.Players => _players;
 
     public Cell? Food { get; private set; }
 

@@ -1,21 +1,20 @@
 using System.Collections.Concurrent;
-using System.Text;
-using System.Text.Json;
+using Google.Protobuf;
 using MQTTnet;
-using MQTTnet.Client;
+using MQTTnet.Formatter;
 using MQTTnet.Protocol;
+using Snake.Protocol;
 
 namespace Snake;
 
 /// <summary>
-/// Thin MQTT wrapper used by both host and guest. Messages are serialized as
-/// JSON envelopes and delivered to the game loop through a concurrent queue.
+/// Thin MQTT 5.2 wrapper used by both host and guest. Protobuf envelopes are
+/// delivered to the game loop through a concurrent queue.
 /// </summary>
 public sealed class MqttTransport : IDisposable
 {
     private readonly IMqttClient _client;
-    private readonly ConcurrentQueue<NetworkEnvelope> _inbox = new();
-    private readonly JsonSerializerOptions _json = NetworkProtocol.JsonOptions;
+    private readonly ConcurrentQueue<Envelope> _inbox = new();
     private bool _disposed;
 
     private MqttTransport(IMqttClient client)
@@ -33,14 +32,14 @@ public sealed class MqttTransport : IDisposable
         string subscribeTopic,
         CancellationToken cancellationToken)
     {
-        var factory = new MqttFactory();
+        var factory = new MqttClientFactory();
         IMqttClient client = factory.CreateMqttClient();
         var transport = new MqttTransport(client);
 
         var options = new MqttClientOptionsBuilder()
             .WithTcpServer(host, port)
             .WithClientId(clientId)
-            .WithCleanSession()
+            .WithProtocolVersion(MqttProtocolVersion.V500)
             .WithTimeout(TimeSpan.FromSeconds(10))
             .Build();
 
@@ -54,7 +53,8 @@ public sealed class MqttTransport : IDisposable
             }
 
             var subscribeOptions = factory.CreateSubscribeOptionsBuilder()
-                .WithTopicFilter(subscribeTopic)
+                .WithTopicFilter(f =>
+                    f.WithTopic(subscribeTopic).WithAtMostOnceQoS())
                 .Build();
 
             client.SubscribeAsync(subscribeOptions, cancellationToken).GetAwaiter().GetResult();
@@ -67,17 +67,17 @@ public sealed class MqttTransport : IDisposable
         }
     }
 
-    public void Publish(string topic, NetworkEnvelope envelope)
+    public void Publish(string topic, Envelope envelope)
     {
         if (_disposed || !_client.IsConnected)
         {
             return;
         }
 
-        string payload = JsonSerializer.Serialize(envelope, _json);
+        envelope.Protocol = NetworkProtocol.Version;
         var message = new MqttApplicationMessageBuilder()
             .WithTopic(topic)
-            .WithPayload(Encoding.UTF8.GetBytes(payload))
+            .WithPayload(envelope.ToByteArray())
             .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtMostOnce)
             .Build();
 
@@ -89,20 +89,19 @@ public sealed class MqttTransport : IDisposable
             TaskScheduler.Default);
     }
 
-    public bool TryDequeue(out NetworkEnvelope envelope) => _inbox.TryDequeue(out envelope!);
+    public bool TryDequeue(out Envelope envelope) => _inbox.TryDequeue(out envelope!);
 
     private Task OnMessageReceived(MqttApplicationMessageReceivedEventArgs args)
     {
         try
         {
-            string payload = args.ApplicationMessage.ConvertPayloadToString();
-            NetworkEnvelope? message = JsonSerializer.Deserialize<NetworkEnvelope>(payload, _json);
-            if (message is not null && message.Protocol == NetworkProtocol.Version)
+            Envelope envelope = Envelope.Parser.ParseFrom(args.ApplicationMessage.Payload);
+            if (envelope.Protocol == NetworkProtocol.Version)
             {
-                _inbox.Enqueue(message);
+                _inbox.Enqueue(envelope);
             }
         }
-        catch (JsonException)
+        catch (InvalidProtocolBufferException)
         {
             // Ignore malformed traffic on the shared broker.
         }

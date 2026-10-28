@@ -4,7 +4,7 @@ namespace Snake;
 
 internal static class Program
 {
-    private const string Version = "3.0.0";
+    private const string Version = "4.0.0";
     private const string DefaultBroker = "broker.emqx.io";
     private const int DefaultBrokerPort = 1883;
     private const string RoomAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -297,7 +297,7 @@ internal static class Program
 
     private static void PrintHelp()
     {
-        Console.WriteLine($"SNAKE {Version} — local and MQTT online two-player battle");
+        Console.WriteLine($"SNAKE {Version} — local and MQTT 5 online two-player battle");
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  dotnet run                                   Local two-player");

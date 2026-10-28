@@ -1,12 +1,12 @@
-# SNAKE 3 · 本地与 MQTT 双人终端贪吃蛇
+# SNAKE 4 · 本地与 MQTT 双人终端贪吃蛇
 
-一个用 **C# / .NET 10** 编写的双人终端贪吃蛇。既支持同一台机器上的本地对战，也支持通过 **MQTT** 联机。两名玩家共享同一张棋盘和食物，各自拥有独立的移动速度、等级与主动加速技能。
+一个用 **C# / .NET 10** 编写的双人终端贪吃蛇。既支持同一台机器上的本地对战，也支持通过 **MQTT 5** 联机，网络消息使用 **Protobuf** 编码。两名玩家共享同一张棋盘和食物，各自拥有独立的移动速度、等级与主动加速技能。
 
 ![SNAKE 本地对战画面](preview.png)
 
 ## 运行
 
-需要 [.NET SDK 10.0](https://dotnet.microsoft.com/download)，以及支持 UTF-8 / 24 位色的交互式终端。项目通过 NuGet 引入 MQTTnet。
+需要 [.NET SDK 10.0](https://dotnet.microsoft.com/download)，以及支持 UTF-8 / 24 位色的交互式终端。项目通过 NuGet 引入 MQTTnet 5.2、Google.Protobuf 和 Grpc.Tools。
 
 ```bash
 cd /home/yukiko/Project/Lab/snake
@@ -34,7 +34,7 @@ dotnet run
 
 ## MQTT 联机
 
-联机采用 **Host 权威**模式：
+联机采用 **Host 权威 + Protobuf** 模式：
 
 ```text
 Host：运行完整游戏模拟，定期发布棋盘快照
@@ -126,17 +126,19 @@ dotnet run -- --help
 
 `--` 是让 `dotnet run` 把后续参数转交给游戏。
 
-## MQTT 消息设计
+## MQTT 5 + Protobuf 消息设计
 
-- 主题前缀：`snake/v3/{room}/...`
-- Host → Guest：`host` 主题，发布完整 `state` 快照
-- Guest → Host：`guest` 主题，发布 `hello`、`input`、`rematch`
+- 主题前缀：`snake/v4/{room}/...`
+- Host → Guest：`host` 主题，发布 Protobuf 编码的完整 `state` 快照
+- Guest → Host：`guest` 主题，发布 Protobuf 编码的 `hello`、`input`、`rematch`
 - 快照约每 **50 ms** 发送一次，包含：
   - 棋盘、食物、难度
   - 两条蛇的身体、分数、等级、存活状态
   - 加速技能的剩余时间与速度倍率
   - 胜负结果与序列号
 - Guest 会忽略比自己已收到快照更旧的序列号
+
+所有 MQTT 负载都是二进制 Protobuf，不使用 JSON。协议定义在 `Protocol/snake.proto`，构建时由 `Grpc.Tools` 生成 C# 类型。MQTT 客户端使用 MQTTnet 5.2 的 `MqttClientFactory` API，并显式使用 MQTT 5.0 协议。
 
 联机时 Host 的主循环仍按 **5 ms 固定步长**模拟；Guest 只负责输入与显示，不自行推进世界。
 
@@ -171,7 +173,7 @@ MQTT 联机对局不会写入本地最高分。
 dotnet run -- --self-test
 ```
 
-自检覆盖本地双人逻辑、碰撞与加速、菜单/HUD/结算布局、最高分持久化，以及 MQTT 快照的序列化/反序列化和联机结算界面。当前 **10 项全部通过**。
+自检覆盖本地双人逻辑、碰撞与加速、菜单/HUD/结算布局、最高分持久化，以及 Protobuf MQTT 快照的序列化/反序列化和联机结算界面。当前 **10 项全部通过**。
 
 ## 项目结构
 
@@ -183,7 +185,9 @@ dotnet run -- --self-test
 | `SnakePlayer.cs` | 单条蛇的身体、转向、等级、速度与技能冷却 |
 | `NetworkGameApp.cs` | MQTT Host/Guest 会话、大厅、快照广播与远程输入 |
 | `MqttTransport.cs` | MQTTnet 连接、订阅、发布与入站消息队列 |
-| `NetworkProtocol.cs` | MQTT 消息、房间主题与可序列化世界快照 |
+| `NetworkProtocol.cs` | MQTT v4 主题与 Protobuf 枚举映射 |
+| `Protocol/snake.proto` | MQTT 消息与快照的 Protobuf schema |
+| `ProtocolViews.cs` | Protobuf 快照的渲染适配与采集 |
 | `IGameView.cs` | 实时世界与 Guest 快照共用的渲染接口 |
 | `Ui/GameRenderer.cs` | 菜单、HUD、棋盘、暂停/结算界面 |
 | `Ui/Canvas.cs` | 字符画布与 ANSI 真彩色渲染 |
@@ -196,6 +200,7 @@ dotnet run -- --self-test
 - `v1.0`：单人版
 - `v2.0`：本地双人对战、独立速度、主动加速技能
 - `v3.0`：MQTT 主机权威联机、大厅、远程输入、在线结算与重赛
+- `v4.0`：MQTTnet 5.2 / MQTT 5.0、Protobuf 二进制消息、Protobuf 快照
 
 ```bash
 git log --oneline --decorate

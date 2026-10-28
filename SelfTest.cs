@@ -1,4 +1,5 @@
-using System.Text.Json;
+using Google.Protobuf;
+using Snake.Protocol;
 using Snake.Ui;
 
 namespace Snake;
@@ -162,31 +163,31 @@ internal static class SelfTest
             Assert(finishedText.Contains("REMATCH", StringComparison.Ordinal), "rematch action");
         });
 
-        Test("online snapshots serialize and render", () =>
+        Test("online protobuf snapshots serialize and render", () =>
         {
             GameWorld world = NewWorld();
-            OnlineGameSnapshot snapshot = OnlineGameSnapshot.Capture(world, 7);
-            var envelope = new NetworkEnvelope
+            WorldSnapshot snapshot = WorldSnapshot.Capture(world, 7);
+            var envelope = new Envelope
             {
-                Type = NetworkMessageTypes.State,
+                Protocol = NetworkProtocol.Version,
+                Type = MessageType.State,
                 Room = "TEST",
                 State = snapshot,
-                Direction = Direction.Up,
+                Direction = GameDirection.Up,
             };
 
-            string json = JsonSerializer.Serialize(envelope, NetworkProtocol.JsonOptions);
-            NetworkEnvelope parsed = JsonSerializer.Deserialize<NetworkEnvelope>(
-                json,
-                NetworkProtocol.JsonOptions)!;
+            byte[] payload = envelope.ToByteArray();
+            Envelope parsed = Envelope.Parser.ParseFrom(payload);
 
-            OnlineGameSnapshot parsedState = parsed.State!;
+            WorldSnapshot parsedState = parsed.State;
             AssertEqual(NetworkProtocol.Version, parsed.Protocol, "protocol version");
             Assert(parsed.Room == "TEST", "room");
+            AssertEqual(MessageType.State, parsed.Type, "message type");
             AssertEqual(7L, parsedState.Sequence, "snapshot sequence");
-            AssertEqual(world.Difficulty, parsedState.Difficulty, "difficulty");
-            Assert(world.Food == parsedState.Food, "food");
+            AssertEqual(world.Difficulty, ((IGameView)parsedState).Difficulty, "difficulty");
+            Assert(world.Food == ((IGameView)parsedState).Food, "food");
             AssertEqual(2, ((IGameView)parsedState).Players.Count, "snapshot players");
-            AssertEqual(world.Players[0].Body[0], parsedState.PlayerStates[0].Body[0], "P1 head");
+            AssertEqual(world.Players[0].Head, ((IPlayerView)parsedState.Players[0]).Body[0], "P1 head");
 
             parsedState.IsOver = true;
             parsedState.WinnerIndex = -1;

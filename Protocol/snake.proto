@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package snake.v4;
+
+option csharp_namespace = "Snake.Protocol";
+
+enum GameDifficulty {
+  GAME_DIFFICULTY_UNSPECIFIED = 0;
+  CHILL = 1;
+  CLASSIC = 2;
+  TURBO = 3;
+}
+
+enum GameDirection {
+  GAME_DIRECTION_UNSPECIFIED = 0;
+  UP = 1;
+  DOWN = 2;
+  LEFT = 3;
+  RIGHT = 4;
+}
+
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  HELLO = 1;
+  INPUT = 2;
+  REMATCH = 3;
+  STATE = 4;
+}
+
+message Cell {
+  int32 x = 1;
+  int32 y = 2;
+}
+
+message PlayerSnapshot {
+  int32 index = 1;
+  repeated Cell body = 2;
+  int32 score = 3;
+  int32 level = 4;
+  bool alive = 5;
+  bool is_boost_active = 6;
+  int32 boost_active_remaining_ms = 7;
+  int32 boost_cooldown_remaining_ms = 8;
+  double speed_multiplier = 9;
+}
+
+message WorldSnapshot {
+  int64 sequence = 1;
+  int64 game_time_ms = 2;
+  GameDifficulty game_difficulty = 3;
+  Cell food = 4;
+  bool is_over = 5;
+  int32 winner_index = 6;
+  repeated PlayerSnapshot players = 7;
+}
+
+message Envelope {
+  int32 protocol = 1;
+  MessageType type = 2;
+  string room = 3;
+  GameDirection direction = 4;
+  bool boost = 5;
+  WorldSnapshot state = 6;
+}

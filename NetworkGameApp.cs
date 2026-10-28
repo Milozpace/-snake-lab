@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Snake.Protocol;
 using Snake.Ui;
 
 namespace Snake;
@@ -22,7 +23,7 @@ public sealed class NetworkGameApp : IDisposable
 
     private MqttTransport? _mqtt;
     private GameWorld? _hostWorld;
-    private OnlineGameSnapshot? _guestSnapshot;
+    private WorldSnapshot? _guestSnapshot;
     private long _sequence;
     private long _lastGuestSequence = -1;
     private long _lastHostSimulationMs;
@@ -241,7 +242,7 @@ public sealed class NetworkGameApp : IDisposable
             return;
         }
 
-        while (_mqtt.TryDequeue(out NetworkEnvelope message))
+        while (_mqtt.TryDequeue(out Envelope message))
         {
             if (!string.Equals(message.Room, _options.Room, StringComparison.Ordinal))
             {
@@ -259,9 +260,9 @@ public sealed class NetworkGameApp : IDisposable
         }
     }
 
-    private void HandleHostMessage(NetworkEnvelope message)
+    private void HandleHostMessage(Envelope message)
     {
-        if (message.Type == NetworkMessageTypes.Hello)
+        if (message.Type == MessageType.Hello)
         {
             if (!_guestJoined)
             {
@@ -277,11 +278,12 @@ public sealed class NetworkGameApp : IDisposable
             return;
         }
 
-        if (message.Type == NetworkMessageTypes.Input && !_hostWorld.IsOver)
+        if (message.Type == MessageType.Input && !_hostWorld.IsOver)
         {
-            if (message.Direction is { } direction)
+            Direction? direction = NetworkProtocol.FromProto(message.Direction);
+            if (direction is { } turn)
             {
-                _hostWorld.TryTurn(1, direction);
+                _hostWorld.TryTurn(1, turn);
             }
 
             if (message.Boost)
@@ -292,15 +294,15 @@ public sealed class NetworkGameApp : IDisposable
             return;
         }
 
-        if (message.Type == NetworkMessageTypes.Rematch && _hostWorld.IsOver)
+        if (message.Type == MessageType.Rematch && _hostWorld.IsOver)
         {
             StartHostRound();
         }
     }
 
-    private void HandleGuestMessage(NetworkEnvelope message)
+    private void HandleGuestMessage(Envelope message)
     {
-        if (message.Type != NetworkMessageTypes.State || message.State is null)
+        if (message.Type != MessageType.State || message.State is null)
         {
             return;
         }
@@ -385,11 +387,11 @@ public sealed class NetworkGameApp : IDisposable
         }
 
         _sequence++;
-        var envelope = new NetworkEnvelope
+        var envelope = new Envelope
         {
-            Type = NetworkMessageTypes.State,
+            Type = MessageType.State,
             Room = _options.Room,
-            State = OnlineGameSnapshot.Capture(_hostWorld, _sequence),
+            State = WorldSnapshot.Capture(_hostWorld, _sequence),
         };
 
         _mqtt.Publish(_hostTopic, envelope);
@@ -397,29 +399,35 @@ public sealed class NetworkGameApp : IDisposable
 
     private void SendHello()
     {
-        _mqtt?.Publish(_guestTopic, new NetworkEnvelope
+        _mqtt?.Publish(_guestTopic, new Envelope
         {
-            Type = NetworkMessageTypes.Hello,
+            Type = MessageType.Hello,
             Room = _options.Room,
         });
     }
 
     private void SendInput(Direction? direction, bool boost)
     {
-        _mqtt?.Publish(_guestTopic, new NetworkEnvelope
+        var envelope = new Envelope
         {
-            Type = NetworkMessageTypes.Input,
+            Type = MessageType.Input,
             Room = _options.Room,
-            Direction = direction,
             Boost = boost,
-        });
+        };
+
+        if (direction is { } turn)
+        {
+            envelope.Direction = NetworkProtocol.ToProto(turn);
+        }
+
+        _mqtt?.Publish(_guestTopic, envelope);
     }
 
     private void SendRematch()
     {
-        _mqtt?.Publish(_guestTopic, new NetworkEnvelope
+        _mqtt?.Publish(_guestTopic, new Envelope
         {
-            Type = NetworkMessageTypes.Rematch,
+            Type = MessageType.Rematch,
             Room = _options.Room,
         });
     }

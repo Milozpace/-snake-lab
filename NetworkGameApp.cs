@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text;
 using Snake.Ui;
 
 namespace Snake;
@@ -49,8 +48,6 @@ public sealed class NetworkGameApp : IDisposable
     private OnlineRole Role => _options.Role;
 
     private string SubscribeTopic => Role == OnlineRole.Host ? _guestTopic : _hostTopic;
-
-    private string PublishTopic => Role == OnlineRole.Host ? _hostTopic : _guestTopic;
 
     public int Run()
     {

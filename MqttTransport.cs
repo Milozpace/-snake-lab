@@ -14,15 +14,13 @@ namespace Snake;
 public sealed class MqttTransport : IDisposable
 {
     private readonly IMqttClient _client;
-    private readonly string _subscribeTopic;
     private readonly ConcurrentQueue<NetworkEnvelope> _inbox = new();
     private readonly JsonSerializerOptions _json = NetworkProtocol.JsonOptions;
     private bool _disposed;
 
-    private MqttTransport(IMqttClient client, string subscribeTopic)
+    private MqttTransport(IMqttClient client)
     {
         _client = client;
-        _subscribeTopic = subscribeTopic;
         _client.ApplicationMessageReceivedAsync += OnMessageReceived;
     }
 
@@ -37,7 +35,7 @@ public sealed class MqttTransport : IDisposable
     {
         var factory = new MqttFactory();
         IMqttClient client = factory.CreateMqttClient();
-        var transport = new MqttTransport(client, subscribeTopic);
+        var transport = new MqttTransport(client);
 
         var options = new MqttClientOptionsBuilder()
             .WithTcpServer(host, port)
